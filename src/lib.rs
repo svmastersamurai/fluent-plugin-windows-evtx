@@ -19,7 +19,8 @@ pub fn load_evtx(path: String) {
 ruby! {
     class EvtxLoader {
         def load(path: String) {
-            println!("Woulda loaded {}", path)
+            println!("Woulda loaded {}", path);
+            load_evtx(path);
         }
     }
 }

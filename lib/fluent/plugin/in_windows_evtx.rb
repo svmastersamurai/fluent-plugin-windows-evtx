@@ -12,10 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+require 'irb'
 
+irb.binding
+require "helix_runtime"
+require "fluent-plugin-windows-evtx/native"
 require "fluent/plugin/input"
 require 'fluent/plugin'
-
 module Fluent::Plugin
   class WindowsEvtxInput < Fluent::Plugin::Input
 	Fluent::Plugin.register_input("windows_evtx", self)
