@@ -1,0 +1,12 @@
+[package]
+name = "fluent-plugin-windows-evtx"
+version = "0.1.0"
+authors = ["dansedlacek <dansedlacek@fb.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+"evtx" = "0.3.0"
+"helix" = "0.7.5"
