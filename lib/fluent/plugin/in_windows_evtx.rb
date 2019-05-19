@@ -1,5 +1,5 @@
 #
-# Copyright 2019- TODO: Write your name
+# Copyright 2019- Dan Sedlacek
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ require "helix_runtime"
 require "fluent-plugin-windows-evtx/native"
 require "fluent/plugin/input"
 require 'fluent/plugin'
+
 module Fluent::Plugin
   class WindowsEvtxInput < Fluent::Plugin::Input
 	Fluent::Plugin.register_input("windows_evtx", self)
@@ -36,7 +37,7 @@ module Fluent::Plugin
                  "description" => [:description, :string],
                  "string_inserts" => [:string_inserts, :array]}
 
-    config_param :file, :string
+    config_param :file_path, :string
     config_param :tag, :string
     config_param :read_interval, :time, default: 2
     config_param :pos_file, :string, default: nil,
@@ -52,17 +53,13 @@ module Fluent::Plugin
       config_set_default :persistent, true
     end
 
-    attr_reader :chs
-
-    def initialize
-      super
-      @keynames = []
-      @tails = {}
+    def evtx_log
+      @evtx_log
     end
 
     def configure(conf)
       super
-      if @file.empty?
+      if @file_path.empty?
         raise Fluent::ConfigError, "windows_evtx: 'file' parameter is required on windows_evtx input"
       end
       @keynames = @keys.map {|k| k.strip }.uniq
@@ -116,35 +113,26 @@ module Fluent::Plugin
 
     def start
       super
-      start, num = @pos_storage.get(ch)
-      @file = EvtxLoader.open(ch)
+      start, num = @pos_storage.get(@file_path)
+      @evtx_log = EvtxLoader.new(@file_path)
       if @read_from_head || (!num || num.zero?)
-        @pos_storage.put(ch, [el.oldest_record_number - 1, 1])
+        @pos_storage.put(@file_path, [@evtx_log.oldest_record_number - 1, 1])
       end
-      timer_execute("in_windows_evtx_#{@file}".to_sym, @read_interval) do
-        on_notify(@file)
+      timer_execute("in_windows_evtx_#{@file_path}".to_sym, @read_interval) do
+        on_notify(@file_path)
       end
     end
 
-    def receive_lines(ch, lines)
+    def receive_lines(lines)
       return if lines.empty?
       begin
-        for r in lines
-          h = {"channel" => ch}
-          @keynames.each do |k|
-            type = KEY_MAP[k][1]
-            value = r.send(KEY_MAP[k][0])
-            h[k]=case type
-                 when :string
-                   @receive_handlers.call(value.to_s)
-                 when :array
-                   value.map {|v| @receive_handlers.call(v.to_s)}
-                 else
-                   raise "Unknown value type: #{type}"
-                 end
-          end
-          #h = Hash[@keynames.map {|k| [k, r.send(KEY_MAP[k][0]).to_s]}]
-          router.emit(@tag, Fluent::Engine.now, h)
+
+        for r in lines.map {|l| convert_hash_keys(l) }
+          h = {'time' => Time.iso8601(r['event']['system']['time_created']['#attributes']['system_time']).to_i}.
+            merge!(r['event']['system']).
+            merge!(r['event']['event_data']).
+            reject! { |k| k =~ /time_created/ }
+          router.emit(@tag, Fluent::Engine.now, h.compact.to_json)
         end
       rescue => e
         log.error "unexpected error", error: e
@@ -152,19 +140,14 @@ module Fluent::Plugin
       end
     end
 
-    def on_notify(ch)
-      current_oldest_record_number = @file.oldest_record_number
-      current_total_records = el.total_records
-
-      read_start, read_num = @pos_storage.get(ch)
-
-      # if total_records is zero, oldest_record_number has no meaning.
-      if current_total_records == 0
-        return
-      end
+    def on_notify(_ch)
+      events = JSON.parse(@evtx_log.to_s)
+      current_oldest_record_number = @evtx_log.oldest_record_number
+      current_total_records = @evtx_log.total_records
+      read_start, read_num = @pos_storage.get(@file_path)
 
       if read_start == 0 && read_num == 0
-        @pos_storage.put(ch, [current_oldest_record_number, current_total_records])
+        @pos_storage.put(@file_path, [current_oldest_record_number, current_total_records])
         return
       end
 
@@ -178,21 +161,32 @@ module Fluent::Plugin
 
       if current_end < old_end
         # something occured.
-        @pos_storage.put(ch, [current_oldest_record_number, current_total_records])
+        @pos_storage.put(@file_path, [current_oldest_record_number, current_total_records])
         return
       end
 
-      winlogs = el.read(Win32::EventLog::SEEK_READ | Win32::EventLog::FORWARDS_READ, old_end + 1)
-      receive_lines(ch, winlogs)
-      @pos_storage.put(ch, [read_start, read_num + winlogs.size])
-    ensure
-      el.close
+      receive_lines(events)
+      @pos_storage.put(@file_path, [read_start, read_num + events.length])
     end
 
-    def to_key(key)
-      key.downcase!
-      key.gsub!(' '.freeze, '_'.freeze)
-      key
-    end
+	def convert_hash_keys(value)
+	  case value
+	  when Array
+		value.map(&:convert_hash_keys)
+	  when Hash
+		Hash[value.map { |k, v| [to_key(k.dup), convert_hash_keys(v)] }]
+	  else
+		value
+	  end
+	end
+
+	def to_key(key)
+      key.gsub(/::/, '/').
+		gsub(/([A-Z]+)([A-Z][a-z])/,'\1_\2').
+		gsub(/([a-z\d])([A-Z])/,'\1_\2').
+		tr("-", "_").
+		tr(" ", "_").
+		downcase
+	end
   end
 end
