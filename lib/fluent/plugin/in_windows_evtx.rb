@@ -36,17 +36,15 @@ module Fluent::Plugin
                  "description" => [:description, :string],
                  "string_inserts" => [:string_inserts, :array]}
 
+    config_param :file, :string
     config_param :tag, :string
     config_param :read_interval, :time, default: 2
     config_param :pos_file, :string, default: nil,
                  obsoleted: "This section is not used anymore. Use 'store_pos' instead."
-    config_param :channels, :array, default: ['application']
     config_param :keys, :array, default: []
     config_param :read_from_head, :bool, default: false
     config_param :from_encoding, :string, default: nil
     config_param :encoding, :string, default: nil
-    desc "Parse 'description' field and set parsed result into event record. 'description' and 'string_inserts' fields are removed from the record"
-    config_param :parse_description, :bool, default: false
 
     config_section :storage do
       config_set_default :usage, "positions"
@@ -58,22 +56,19 @@ module Fluent::Plugin
 
     def initialize
       super
-      @chs = []
       @keynames = []
       @tails = {}
     end
 
     def configure(conf)
       super
-      @chs = @channels.map {|ch| ch.strip.downcase }.uniq
-      if @chs.empty?
-        raise Fluent::ConfigError, "windows_evtx: 'channels' parameter is required on windows_evtx input"
+      if @file.empty?
+        raise Fluent::ConfigError, "windows_evtx: 'file' parameter is required on windows_evtx input"
       end
       @keynames = @keys.map {|k| k.strip }.uniq
       if @keynames.empty?
         @keynames = KEY_MAP.keys
       end
-      @keynames.delete('string_inserts') if @parse_description
 
       @tag = tag
       @stop = false
@@ -121,22 +116,14 @@ module Fluent::Plugin
 
     def start
       super
-      @chs.each do |ch|
-        start, num = @pos_storage.get(ch)
-        if @read_from_head || (!num || num.zero?)
-		  # TODO: Open with rust binding!
-          el = EvtxLoader.open(ch)
-          @pos_storage.put(ch, [el.oldest_record_number - 1, 1])
-          el.close
-        end
-        timer_execute("in_windows_evtx_#{escape_channel(ch)}".to_sym, @read_interval) do
-          on_notify(ch)
-        end
+      start, num = @pos_storage.get(ch)
+      @file = EvtxLoader.open(ch)
+      if @read_from_head || (!num || num.zero?)
+        @pos_storage.put(ch, [el.oldest_record_number - 1, 1])
       end
-    end
-
-    def escape_channel(ch)
-      ch.gsub(/[^a-zA-Z0-9]/, '_')
+      timer_execute("in_windows_evtx_#{@file}".to_sym, @read_interval) do
+        on_notify(@file)
+      end
     end
 
     def receive_lines(ch, lines)
@@ -156,7 +143,6 @@ module Fluent::Plugin
                    raise "Unknown value type: #{type}"
                  end
           end
-          parse_desc(h) if @parse_description
           #h = Hash[@keynames.map {|k| [k, r.send(KEY_MAP[k][0]).to_s]}]
           router.emit(@tag, Fluent::Engine.now, h)
         end
@@ -167,9 +153,7 @@ module Fluent::Plugin
     end
 
     def on_notify(ch)
-      el = Win32::EventLog.open(ch)
-
-      current_oldest_record_number = el.oldest_record_number
+      current_oldest_record_number = @file.oldest_record_number
       current_total_records = el.total_records
 
       read_start, read_num = @pos_storage.get(ch)
@@ -203,42 +187,6 @@ module Fluent::Plugin
       @pos_storage.put(ch, [read_start, read_num + winlogs.size])
     ensure
       el.close
-    end
-
-    GROUP_DELIMITER = "\r\n\r\n".freeze
-    RECORD_DELIMITER = "\r\n\t".freeze
-    FIELD_DELIMITER = "\t\t".freeze
-    NONE_FIELD_DELIMITER = "\t".freeze
-
-    def parse_desc(record)
-      desc = record.delete('description'.freeze)
-      return if desc.nil?
-
-      elems = desc.split(GROUP_DELIMITER)
-      record['description_title'] = elems.shift
-      elems.each { |elem|
-        parent_key = nil
-        elem.split(RECORD_DELIMITER).each { |r|
-          key, value = if r.index(FIELD_DELIMITER)
-                         r.split(FIELD_DELIMITER)
-                       else
-                         r.split(NONE_FIELD_DELIMITER)
-                       end
-          key.chop!  # remove ':' from key
-          if value.nil?
-            parent_key = to_key(key)
-          else
-            # parsed value sometimes contain unexpected "\t". So remove it.
-            value.strip!
-            if parent_key.nil?
-              record[to_key(key)] = value
-            else
-              k = "#{parent_key}.#{to_key(key)}"
-              record[k] = value
-            end
-          end
-        }
-      }
     end
 
     def to_key(key)
