@@ -12,9 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-require 'irb'
 
-irb.binding
 require "helix_runtime"
 require "fluent-plugin-windows-evtx/native"
 require "fluent/plugin/input"
@@ -127,7 +125,7 @@ module Fluent::Plugin
         start, num = @pos_storage.get(ch)
         if @read_from_head || (!num || num.zero?)
 		  # TODO: Open with rust binding!
-          el = Win32::EventLog.open(ch)
+          el = EvtxLoader.open(ch)
           @pos_storage.put(ch, [el.oldest_record_number - 1, 1])
           el.close
         end

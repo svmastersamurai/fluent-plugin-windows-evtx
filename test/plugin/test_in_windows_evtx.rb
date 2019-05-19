@@ -7,7 +7,7 @@ class WindowsEvtxInputTest < Test::Unit::TestCase
   end
 
   test "failure" do
-    flunk
+    create_driver('a')
   end
 
   private
