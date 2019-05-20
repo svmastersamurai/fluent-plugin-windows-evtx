@@ -1,7 +1,7 @@
 [package]
 name = "fluent-plugin-windows-evtx"
 version = "0.1.0"
-authors = ["dansedlacek <dansedlacek@fb.com>"]
+authors = ["dansedlacek <danfsedlacek@gmail.com>"]
 edition = "2018"
 
 [lib]
