@@ -7,7 +7,7 @@ require 'fluent/plugin/in_windows_evtx'
 class WindowsEvtxInputTest < Test::Unit::TestCase
   CONFIG = config_element("ROOT", "", {"tag" => "fluent.evtxlog",
                                        'read_interval' => 0.5,
-                                       'file_path' => '/home/dansedlacek/work/Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx'}, [
+                                       'file_path' => '/home/dansedlacek/work/Security.evtx'}, [
                             config_element("storage", "", {
                                              '@type' => 'local',
                                              'persistent' => false
@@ -23,7 +23,7 @@ class WindowsEvtxInputTest < Test::Unit::TestCase
 
   test "should output parseable JSON" do
     d = create_driver
-    d.run(expect_emits: 87) #, timeout: 1.0)
+    d.run(expect_emits: 65189) #, timeout: 1.0)
 
     d.events.each do |evt|
       assert_nothing_raised do
