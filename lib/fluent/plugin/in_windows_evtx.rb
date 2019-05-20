@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 #
 # Copyright 2019- Dan Sedlacek
 #
@@ -13,14 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-require "helix_runtime"
-require "fluent-plugin-windows-evtx/native"
-require "fluent/plugin/input"
+require 'helix_runtime'
+require 'fluent-plugin-windows-evtx/native'
+require 'fluent/plugin/input'
 require 'fluent/plugin'
 
 module Fluent::Plugin
+  # A simple class that can read Windows EVTX files.
   class WindowsEvtxInput < Fluent::Plugin::Input
-	Fluent::Plugin.register_input("windows_evtx", self)
+    Fluent::Plugin.register_input('windows_evtx', self)
 
     helpers :timer, :storage
 
@@ -31,7 +34,7 @@ module Fluent::Plugin
     config_param :read_interval, :time, default: 2
 
     config_section :storage do
-      config_set_default :usage, "positions"
+      config_set_default :usage, 'positions'
       config_set_default :@type, DEFAULT_STORAGE_TYPE
       config_set_default :persistent, true
     end
@@ -39,32 +42,36 @@ module Fluent::Plugin
     def configure(conf)
       super
       if @file_path.empty?
-        raise Fluent::ConfigError, "windows_evtx: 'file' parameter is required on windows_evtx input"
+        raise Fluent::ConfigError,
+              "windows_evtx: 'file' parameter is required on windows_evtx input"
       end
 
       @tag = tag
       @stop = false
-      @pos_storage = storage_create(usage: "positions")
+      @pos_storage = storage_create(usage: 'positions')
     end
 
     def start
       super
-      start, num = @pos_storage.get(@file_path)
+      _start, _num = @pos_storage.get(@file_path)
       @evtx_log = EvtxLoader.new(@file_path)
       timer_execute("in_windows_evtx_#{@file_path}".to_sym, @read_interval) do
         on_notify(@file_path)
       end
     end
 
-    def on_notify(_)
-      #return unless @evtx_log.was_modified
+    def on_notify(_wut)
+      # return unless @evtx_log.was_modified
 
       current_oldest_record_number = @evtx_log.oldest_record_number
       current_total_records = @evtx_log.total_records
       read_start, read_num = @pos_storage.get(@file_path)
 
-      if read_start == 0 && read_num == 0
-        @pos_storage.put(@file_path, [current_oldest_record_number, current_total_records])
+      if read_start.zero? && read_num.zero?
+        @pos_storage.put(
+          @file_path,
+          [current_oldest_record_number, current_total_records]
+        )
         return
       end
 
@@ -78,11 +85,14 @@ module Fluent::Plugin
 
       if current_end < old_end
         # something occured.
-        @pos_storage.put(@file_path, [current_oldest_record_number, current_total_records])
+        @pos_storage.put(
+          @file_path,
+          [current_oldest_record_number, current_total_records]
+        )
         return
       end
 
-      for event in @evtx_log.events
+      @evtx_log.events.each do |event|
         router.emit(@tag, Fluent::Engine.now, event)
       end
 
